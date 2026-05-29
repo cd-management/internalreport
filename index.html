@@ -488,7 +488,7 @@
             </button>
             <button type="button" class="btn" id="btn-export-pdf">
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 2h6l2 2v10H4V2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M10 2v2h2" stroke="currentColor" stroke-width="1.5"/></svg>
-              Exportar PDF
+              Exportar PDF + JSON
             </button>
             <button type="button" class="btn btn-danger" id="btn-reset">
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 6h10M5 6V4a1 1 0 011-1h4a1 1 0 011 1v2m-1 0v7m-4-7v7M4 6l1 8a1 1 0 001 1h4a1 1 0 001-1l1-8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -670,9 +670,8 @@
     else { $('save-text').textContent = 'Pronto'; }
   } catch (e) { $('save-text').textContent = 'Pronto'; }
 
-  // ── Export JSON
-  $('btn-export-json').addEventListener('click', () => {
-    const data = collect();
+  // ── Export JSON (função reutilizável)
+  function downloadJSON(data) {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -680,6 +679,10 @@
     a.download = filename(data, 'json');
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  $('btn-export-json').addEventListener('click', () => {
+    downloadJSON(collect());
     toast('Ficheiro JSON exportado', 'success');
   });
 
@@ -717,16 +720,49 @@
     toast('Novo registo iniciado');
   });
 
-  // ── Export PDF (via print)
-  $('btn-export-pdf').addEventListener('click', () => {
+  // ── Export PDF (impressão do browser) + JSON
+  // Chrome/Edge: o JSON é gravado na pasta que escolheres; o PDF sai pela janela de impressão.
+  // Outros browsers: o JSON descarrega para Transferências; o PDF sai pela janela de impressão.
+  $('btn-export-pdf').addEventListener('click', async () => {
     const d = collect();
+    const jsonName = filename(d, 'json');
+    const jsonBlob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
+
+    let savedToFolder = false;
+    if (window.showDirectoryPicker) {
+      let dir = null;
+      try {
+        dir = await window.showDirectoryPicker({ mode: 'readwrite' });
+      } catch (err) {
+        if (err && err.name === 'AbortError') { toast('Exportação cancelada'); return; }
+        dir = null; // outro erro → descarrega em vez de gravar na pasta
+      }
+      if (dir) {
+        try {
+          const handle = await dir.getFileHandle(jsonName, { create: true });
+          const w = await handle.createWritable();
+          await w.write(jsonBlob);
+          await w.close();
+          savedToFolder = true;
+        } catch (err) {
+          savedToFolder = false; // falhou a gravar → descarrega
+        }
+      }
+    }
+
+    if (!savedToFolder) {
+      downloadJSON(d); // descarrega o JSON para Transferências
+    }
+
+    // PDF pela janela de impressão (mantém o aspeto original)
     renderPrintView(d);
     const original = document.title;
     document.title = filename(d, '').replace(/\.$/, '');
+    toast(savedToFolder ? 'JSON guardado na pasta — a abrir o PDF…' : 'JSON exportado — a abrir o PDF…', 'success');
     setTimeout(() => {
       window.print();
       setTimeout(() => { document.title = original; }, 500);
-    }, 80);
+    }, 250);
   });
 
   // ── Submit (confirm)
